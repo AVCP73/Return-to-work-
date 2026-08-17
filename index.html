@@ -367,9 +367,17 @@
   <div class="view" id="view-log">
     <div id="loginBox" class="login-box">
       <p style="font-weight:700; color:var(--ink); font-size:.95rem; margin-bottom:4px;">Sign in</p>
-      <p>Enter your work email — we'll send you a login link.</p>
-      <input type="email" id="loginEmail" placeholder="you@avoncourtpackaging.ie">
-      <button class="btn" id="sendLinkBtn">Send login link</button>
+      <div id="emailStep">
+        <p>Enter your work email — we'll send you a one-time code.</p>
+        <input type="email" id="loginEmail" placeholder="you@avoncourt.com">
+        <button class="btn" id="sendLinkBtn">Send login code</button>
+      </div>
+      <div id="codeStep" style="display:none;">
+        <p>Enter the code from the email.</p>
+        <input type="text" id="loginCode" inputmode="numeric" maxlength="10" placeholder="one-time code" style="letter-spacing:.25em; text-align:center;">
+        <button class="btn" id="verifyCodeBtn">Verify &amp; continue</button>
+        <p style="font-size:.8rem; margin-top:8px;">Didn't get it? <span id="resendCodeBtn" style="text-decoration:underline; cursor:pointer;">Send again</span></p>
+      </div>
       <div class="login-msg" id="loginMsg"></div>
     </div>
     <div id="logArea" style="display:none;">
@@ -542,17 +550,49 @@ document.getElementById("rtwForm").addEventListener("submit", async (e)=>{
 let records = [];
 let sessionChecked = false;
 
+let pendingEmail = "";
+
+async function sendCode(email, msg){
+  msg.textContent = "Sending…";
+  // No emailRedirectTo: the email contains a one-time code, not a clickable link.
+  // Corporate mail scanning (Outlook Safe Links) visits links automatically, which
+  // consumes the single-use token before the user can click it.
+  const { error } = await sb.auth.signInWithOtp({ email });
+  if(error){ msg.textContent = "Error: " + error.message; return false; }
+  msg.textContent = "Code sent to " + email + ".";
+  return true;
+}
+
 document.getElementById("sendLinkBtn").addEventListener("click", async ()=>{
   const email = document.getElementById("loginEmail").value.trim();
   const msg = document.getElementById("loginMsg");
   if(!email){ msg.textContent = "Enter an email address."; return; }
-  msg.textContent = "Sending…";
-  const { error } = await sb.auth.signInWithOtp({
-    email,
-    options: { emailRedirectTo: window.location.href }
-  });
-  msg.textContent = error ? ("Error: " + error.message) : "Check your inbox for a login link.";
+  if(await sendCode(email, msg)){
+    pendingEmail = email;
+    document.getElementById("emailStep").style.display = "none";
+    document.getElementById("codeStep").style.display = "block";
+    document.getElementById("loginCode").focus();
+  }
 });
+
+document.getElementById("resendCodeBtn").addEventListener("click", async ()=>{
+  if(pendingEmail) await sendCode(pendingEmail, document.getElementById("loginMsg"));
+});
+
+async function verifyCode(){
+  const code = document.getElementById("loginCode").value.trim();
+  const msg = document.getElementById("loginMsg");
+  if(!code){ msg.textContent = "Enter the code from the email."; return; }
+  msg.textContent = "Checking…";
+  const { error } = await sb.auth.verifyOtp({ email: pendingEmail, token: code, type: "email" });
+  if(error){ msg.textContent = "That code didn't work — check it, or send a new one."; return; }
+  msg.textContent = "";
+  sessionChecked = false;
+  checkSession();
+}
+
+document.getElementById("verifyCodeBtn").addEventListener("click", verifyCode);
+document.getElementById("loginCode").addEventListener("keydown", e=>{ if(e.key === "Enter") verifyCode(); });
 
 document.getElementById("signOutBtn").addEventListener("click", async ()=>{
   await sb.auth.signOut();
